@@ -32,6 +32,34 @@ export const models: AdapterModel[] = [
   { id: "codellama", label: "Code Llama" },
 ];
 
+function normalizeModelId(name: string): string {
+  return name.replace(/:latest$/, "");
+}
+
+function buildMergedModelOptions(liveModels: string[]): Array<{ value: string; label: string }> {
+  const curatedLabelById = new Map(models.map((m) => [m.id, m.label]));
+  const orderedIds: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of liveModels) {
+    const id = normalizeModelId(raw);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    orderedIds.push(id);
+  }
+
+  for (const m of models) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    orderedIds.push(m.id);
+  }
+
+  return orderedIds.map((id) => ({
+    value: id,
+    label: curatedLabelById.get(id) ?? id,
+  }));
+}
+
 export const agentConfigurationDoc = `# Ollama Local Adapter Configuration
 
 ## Required
@@ -236,10 +264,10 @@ async function listModels(): Promise<AdapterModel[]> {
   try {
     const client = new OllamaApiClient({} as OllamaAdapterConfig);
     const result = await client.testConnection();
-    if (!result.ok || !result.models?.length) return models;
-    return result.models.map((name) => ({
-      id: name.replace(/:latest$/, ""),
-      label: name.replace(/:latest$/, ""),
+    if (!result.ok) return models;
+    return buildMergedModelOptions(result.models ?? []).map((entry) => ({
+      id: entry.value,
+      label: entry.label,
     }));
   } catch {
     return models;
@@ -247,16 +275,13 @@ async function listModels(): Promise<AdapterModel[]> {
 }
 
 async function getConfigSchema(): Promise<AdapterConfigSchema> {
-  // Fetch live models from Ollama for the dropdown; fall back to curated list
+  // Fetch live models from Ollama and merge with curated fallback for a stable dropdown
   let modelOptions: Array<{ label: string; value: string }> = [];
   try {
     const client = new OllamaApiClient({} as OllamaAdapterConfig);
     const result = await client.testConnection();
-    if (result.ok && result.models?.length) {
-      modelOptions = result.models.map((name) => {
-        const id = name.replace(/:latest$/, "");
-        return { value: id, label: id };
-      });
+    if (result.ok) {
+      modelOptions = buildMergedModelOptions(result.models ?? []);
     }
   } catch {
     // ignore
