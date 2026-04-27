@@ -271,7 +271,7 @@ async function getConfigSchema(): Promise<AdapterConfigSchema> {
       {
         key: "model",
         label: "Model",
-        type: "combobox",
+        type: "select",
         options: modelOptions,
         default: defaultModel,
         required: true,
