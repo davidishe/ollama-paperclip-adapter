@@ -1,0 +1,47 @@
+{
+  "name": "ollama-paperclip-adapter",
+  "version": "0.1.0",
+  "description": "Paperclip external adapter for local Ollama models",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  },
+  "peerDependencies": {
+    "paperclip": "*"
+  },
+  "peerDependenciesMeta": {
+    "paperclip": {
+      "optional": true
+    }
+  },
+  "license": "MIT"
+}
