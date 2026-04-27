@@ -1,19 +1,30 @@
 import { describe, it, expect } from "vitest";
 import { buildPrompt } from "../prompt-builder.js";
-import type { AdapterExecutionContext } from "../types.js";
+import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
 
-function makeCtx(overrides: Partial<AdapterExecutionContext["context"]> = {}): AdapterExecutionContext {
+function makeCtx(contextOverrides: Record<string, unknown> = {}): AdapterExecutionContext {
   return {
     runId: "run-test-123",
-    agent: { id: "agent-1", name: "TestBot", role: "assistant" },
+    agent: {
+      id: "agent-1",
+      companyId: "company-1",
+      name: "TestBot",
+      adapterType: "ollama_local",
+      adapterConfig: { model: "llama3.2" },
+    },
+    runtime: {
+      sessionId: null,
+      sessionParams: null,
+      sessionDisplayId: null,
+      taskKey: null,
+    },
     config: { model: "llama3.2" },
     context: {
       wakeReason: "heartbeat",
       taskId: "TASK-1",
       taskDescription: "Do something useful",
-      ...overrides,
+      ...contextOverrides,
     },
-    sessionParams: undefined,
     onLog: async () => {},
   };
 }
@@ -39,20 +50,19 @@ describe("buildPrompt", () => {
     expect(system).toContain("Extra instruction");
   });
 
-  it("includes company info when provided", () => {
+  it("includes company name when provided", () => {
     const { system } = buildPrompt(
-      makeCtx({ company: { name: "Acme Corp", mission: "Do good things" } }),
+      makeCtx({ companyName: "Acme Corp" }),
       { model: "llama3.2" },
     );
     expect(system).toContain("Acme Corp");
-    expect(system).toContain("Do good things");
   });
 
-  it("includes previous run summary when available", () => {
-    const { user } = buildPrompt(
-      makeCtx({ previousRuns: [{ summary: "Last time I fixed a bug" }] }),
+  it("includes goal title when provided", () => {
+    const { system } = buildPrompt(
+      makeCtx({ goalTitle: "Grow revenue" }),
       { model: "llama3.2" },
     );
-    expect(user).toContain("Last time I fixed a bug");
+    expect(system).toContain("Grow revenue");
   });
 });

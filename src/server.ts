@@ -1,18 +1,24 @@
-import { buildPrompt } from "./prompt-builder.js";
-import { OllamaApiClient } from "./ollama-api.js";
 import type {
   AdapterExecutionContext,
   AdapterExecutionResult,
-  EnvironmentTestCheck,
-  EnvironmentTestResult,
+  AdapterEnvironmentTestContext,
+  AdapterEnvironmentTestResult,
+  ServerAdapterModule,
+  AdapterModel,
+} from "@paperclipai/adapter-utils";
+import { buildPrompt } from "./prompt-builder.js";
+import { OllamaApiClient } from "./ollama-api.js";
+import type {
   OllamaAdapterConfig,
   OllamaSessionMessage,
   OllamaSessionState,
 } from "./types.js";
 
-export const type = "ollama_local" as const;
+const ADAPTER_TYPE = "ollama_local" as const;
 
-export const models = [
+const MAX_HISTORY_MESSAGES = 20;
+
+export const models: AdapterModel[] = [
   { id: "llama3.2", label: "Llama 3.2" },
   { id: "llama3.1", label: "Llama 3.1" },
   { id: "qwen2.5-coder", label: "Qwen 2.5 Coder" },
@@ -22,7 +28,7 @@ export const models = [
   { id: "phi4", label: "Phi-4" },
   { id: "deepseek-r1", label: "DeepSeek R1" },
   { id: "codellama", label: "Code Llama" },
-] as const;
+];
 
 export const agentConfigurationDoc = `# Ollama Local Adapter Configuration
 
@@ -38,22 +44,37 @@ export const agentConfigurationDoc = `# Ollama Local Adapter Configuration
 - customSystemPrompt: append extra instructions to system prompt
 
 ## Setup
-1. Install Ollama: https://ollama.com/download
+1. Install Ollama: curl -fsSL https://ollama.com/install.sh | sh
 2. Pull a model: ollama pull llama3.2
 3. Ollama runs automatically on http://localhost:11434
-4. No API key needed — it runs fully locally.
+4. No API key needed.
 
 ## Remote Ollama
 Set baseUrl to reach a non-local Ollama instance:
   baseUrl: http://192.168.1.100:11434
 `;
 
-const MAX_HISTORY_MESSAGES = 20;
+function normalizeSession(sessionParams: Record<string, unknown> | null): OllamaSessionState {
+  const base: OllamaSessionState = { schemaVersion: 1, messageHistory: [] };
+  if (!sessionParams) return base;
+  const candidate = sessionParams as Partial<OllamaSessionState>;
+  if (!Array.isArray(candidate.messageHistory)) return base;
+  return {
+    schemaVersion: typeof candidate.schemaVersion === "number" ? candidate.schemaVersion : 1,
+    messageHistory: candidate.messageHistory.filter(
+      (m): m is OllamaSessionMessage =>
+        typeof m === "object" &&
+        m !== null &&
+        ["system", "user", "assistant"].includes((m as { role: string }).role) &&
+        typeof (m as { content?: unknown }).content === "string",
+    ),
+  };
+}
 
-export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const config = ctx.config as OllamaAdapterConfig;
+async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
+  const config = ctx.config as unknown as OllamaAdapterConfig;
   const client = new OllamaApiClient(config);
-  const sessionState: OllamaSessionState = normalizeSession(ctx.sessionParams);
+  const sessionState: OllamaSessionState = normalizeSession(ctx.runtime.sessionParams);
 
   await ctx.onLog("stdout", `[ollama] Starting run ${ctx.runId} for agent "${ctx.agent.name}"\n`);
   await ctx.onLog("stdout", `[ollama] Model: ${config.model} @ ${config.baseUrl ?? "http://localhost:11434"}\n`);
@@ -84,6 +105,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     return {
       exitCode: 0,
+      signal: null,
       timedOut: false,
       usage: {
         inputTokens: result.usage.promptTokens,
@@ -96,7 +118,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       sessionParams: {
         schemaVersion: 1,
         messageHistory: updatedHistory,
-      },
+      } as unknown as Record<string, unknown>,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -104,21 +126,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     return {
       exitCode: 1,
+      signal: null,
       timedOut: false,
       usage: { inputTokens: 0, outputTokens: 0 },
       provider: "ollama",
       model: config.model,
       costUsd: 0,
       summary: `Error: ${errorMessage}`,
-      sessionParams: sessionState,
+      sessionParams: sessionState as unknown as Record<string, unknown>,
     };
   }
 }
 
-export async function testEnvironment(ctx: AdapterExecutionContext): Promise<EnvironmentTestResult> {
-  const config = ctx.config as OllamaAdapterConfig;
-  const checks: EnvironmentTestCheck[] = [];
+async function testEnvironment(ctx: AdapterEnvironmentTestContext): Promise<AdapterEnvironmentTestResult> {
+  const config = ctx.config as unknown as OllamaAdapterConfig;
   const baseUrl = config.baseUrl ?? "http://localhost:11434";
+  const checks: AdapterEnvironmentTestResult["checks"] = [];
 
   if (!config.model) {
     checks.push({
@@ -135,7 +158,7 @@ export async function testEnvironment(ctx: AdapterExecutionContext): Promise<Env
     checks.push({
       code: "ollama_unreachable",
       level: "error",
-      message: `Ollama is not reachable at ${baseUrl}: ${connectionResult.error}. Make sure Ollama is installed and running.`,
+      message: `Ollama is not reachable at ${baseUrl}: ${connectionResult.error}. Install with: curl -fsSL https://ollama.com/install.sh | sh`,
     });
   } else {
     checks.push({
@@ -148,7 +171,7 @@ export async function testEnvironment(ctx: AdapterExecutionContext): Promise<Env
     if (availableModels.length === 0) {
       checks.push({
         code: "no_models_pulled",
-        level: "warning",
+        level: "warn",
         message: `No models found. Pull one with: ollama pull ${config.model || "llama3.2"}`,
       });
     } else {
@@ -172,31 +195,37 @@ export async function testEnvironment(ctx: AdapterExecutionContext): Promise<Env
   }
 
   return {
-    adapterType: "ollama_local",
+    adapterType: ADAPTER_TYPE,
     status: checks.some((c) => c.level === "error") ? "fail" : "pass",
     checks,
     testedAt: new Date().toISOString(),
   };
 }
 
-function normalizeSession(sessionParams: unknown): OllamaSessionState {
-  const base: OllamaSessionState = { schemaVersion: 1, messageHistory: [] };
-  if (!sessionParams || typeof sessionParams !== "object") {
-    return base;
+async function listModels(): Promise<AdapterModel[]> {
+  try {
+    const client = new OllamaApiClient({} as OllamaAdapterConfig);
+    const result = await client.testConnection();
+    if (!result.ok || !result.models?.length) return models;
+    return result.models.map((name) => ({
+      id: name.replace(/:latest$/, ""),
+      label: name.replace(/:latest$/, ""),
+    }));
+  } catch {
+    return models;
   }
-  const candidate = sessionParams as Partial<OllamaSessionState>;
-  if (!Array.isArray(candidate.messageHistory)) {
-    return base;
-  }
+}
+
+export function createServerAdapter(): ServerAdapterModule {
   return {
-    schemaVersion: typeof candidate.schemaVersion === "number" ? candidate.schemaVersion : 1,
-    messageHistory: candidate.messageHistory.filter(
-      (m): m is OllamaSessionMessage =>
-        typeof m === "object" &&
-        m !== null &&
-        (m as { role?: string }).role !== undefined &&
-        ["system", "user", "assistant"].includes((m as { role: string }).role) &&
-        typeof (m as { content?: unknown }).content === "string",
-    ),
+    type: ADAPTER_TYPE,
+    execute,
+    testEnvironment,
+    models,
+    listModels,
+    agentConfigurationDoc,
+    supportsLocalAgentJwt: false,
+    supportsInstructionsBundle: false,
+    requiresMaterializedRuntimeSkills: false,
   };
 }

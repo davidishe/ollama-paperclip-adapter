@@ -1,4 +1,5 @@
-import type { AdapterExecutionContext, OllamaAdapterConfig } from "./types.js";
+import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
+import type { OllamaAdapterConfig } from "./types.js";
 
 export interface BuiltPrompt {
   system: string;
@@ -9,32 +10,19 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: OllamaAdapterC
   const { agent, context, runId } = ctx;
   const system: string[] = [];
 
-  system.push(`You are ${agent.name}, ${agent.role ?? "AI employee"}.`);
-  if (agent.description) {
-    system.push(`Role details: ${agent.description}`);
+  const agentConfig = ctx.config as Record<string, unknown>;
+
+  system.push(`You are ${agent.name}, an AI employee.`);
+
+  const company = context as Record<string, unknown>;
+  if (typeof company["companyName"] === "string") {
+    system.push(`Company: ${company["companyName"]}`);
   }
-  if (context.company?.name) {
-    system.push(`Company: ${context.company.name}`);
+  if (typeof company["goalTitle"] === "string") {
+    system.push(`Current goal: ${company["goalTitle"]}`);
   }
-  if (context.company?.mission) {
-    system.push(`Mission: ${context.company.mission}`);
-  }
-  if (context.project?.goals?.length) {
-    system.push(`Project goals:\n${context.project.goals.map((v, i) => `${i + 1}. ${v}`).join("\n")}`);
-  }
-  if (context.goal?.title) {
-    system.push(`Current goal: ${context.goal.title}`);
-    if (context.goal.description) {
-      system.push(context.goal.description);
-    }
-  }
-  if (context.parentTasks?.length) {
-    system.push(`Parent tasks:\n${context.parentTasks.map((x) => `- ${x.title}`).join("\n")}`);
-  }
-  if (context.skills?.length) {
-    system.push(
-      `Available skills:\n${context.skills.map((x) => `- ${x.name}${x.description ? `: ${x.description}` : ""}`).join("\n")}`,
-    );
+  if (typeof company["taskDescription"] === "string") {
+    system.push(`Task context: ${company["taskDescription"]}`);
   }
   if (config.customSystemPrompt) {
     system.push(`Additional instructions: ${config.customSystemPrompt}`);
@@ -42,20 +30,21 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: OllamaAdapterC
 
   const user: string[] = [];
   user.push(`Run ID: ${runId}`);
-  user.push(`Wake reason: ${context.wakeReason ?? "scheduled heartbeat"}`);
-  if (context.taskId) {
-    user.push(`Task ID: ${context.taskId}`);
+
+  if (typeof company["wakeReason"] === "string") {
+    user.push(`Wake reason: ${company["wakeReason"]}`);
   }
-  if (context.taskDescription) {
-    user.push(`Task:\n${context.taskDescription}`);
+  if (typeof company["taskId"] === "string") {
+    user.push(`Task ID: ${company["taskId"]}`);
   }
-  if (context.taskComments?.length) {
-    user.push(
-      `Recent comments:\n${context.taskComments.map((x) => `- ${x.author ?? "unknown"}: ${x.body}`).join("\n")}`,
-    );
+  if (typeof company["taskTitle"] === "string") {
+    user.push(`Task: ${company["taskTitle"]}`);
   }
-  if (context.previousRuns?.[0]?.summary) {
-    user.push(`Previous run summary:\n${context.previousRuns[0].summary}`);
+  if (typeof company["taskDescription"] === "string") {
+    user.push(`Description:\n${company["taskDescription"]}`);
+  }
+  if (typeof company["promptText"] === "string") {
+    user.push(company["promptText"]);
   }
 
   return {
