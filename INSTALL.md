@@ -48,7 +48,7 @@ git clone https://github.com/davidishe/ollama-paperclip-adapter.git
 cd ollama-paperclip-adapter
 npm install
 npm run build
-npm test   # должно быть 11 тестов зелёных
+npm test   # все тесты должны быть зелёными
 ```
 
 ---
@@ -141,7 +141,7 @@ temperature: 0.7
 
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|----------|
-| `model` | string | — | **Обязательно.** Имя модели в Ollama (например `llama3.2`) |
+| `model` | string | первая доступная из `ollama /api/tags` | Имя модели в Ollama (например `llama3.2`) |
 | `baseUrl` | string | `http://localhost:11434` | URL Ollama-сервера |
 | `maxTokens` | number | `8192` | Максимум токенов в ответе |
 | `temperature` | number | `0.7` | Температура сэмплирования |

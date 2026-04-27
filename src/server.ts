@@ -9,6 +9,7 @@ import type {
 } from "@paperclipai/adapter-utils";
 import { buildPrompt } from "./prompt-builder.js";
 import { OllamaApiClient } from "./ollama-api.js";
+import { normalizeModelName, pickModel } from "./model-utils.js";
 import type {
   OllamaAdapterConfig,
   OllamaSessionMessage,
@@ -74,13 +75,42 @@ function normalizeSession(sessionParams: Record<string, unknown> | null): Ollama
 
 async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const config = ctx.config as unknown as OllamaAdapterConfig;
-  const client = new OllamaApiClient(config);
+  const baseUrl = config.baseUrl ?? "http://localhost:11434";
   const sessionState: OllamaSessionState = normalizeSession(ctx.runtime.sessionParams);
 
-  await ctx.onLog("stdout", `[ollama] Starting run ${ctx.runId} for agent "${ctx.agent.name}"\n`);
-  await ctx.onLog("stdout", `[ollama] Model: ${config.model} @ ${config.baseUrl ?? "http://localhost:11434"}\n`);
+  let resolvedModel = config.model ? normalizeModelName(config.model) : "";
+  if (!resolvedModel) {
+    const connectionResult = await new OllamaApiClient(config).testConnection();
+    const fallback = pickModel(undefined, connectionResult.models ?? []);
+    if (fallback.model) {
+      resolvedModel = fallback.model;
+      await ctx.onLog("stdout", `[ollama] Model was not set. Using first available model: ${resolvedModel}\n`);
+    }
+  }
 
-  const { system, user } = buildPrompt(ctx, config);
+  if (!resolvedModel) {
+    const errorMessage = "No model selected and no local Ollama models found. Pull one with: ollama pull llama3.2";
+    await ctx.onLog("stderr", `[ollama] API error: ${errorMessage}\n`);
+    return {
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      provider: "ollama",
+      model: "unknown",
+      costUsd: 0,
+      summary: `Error: ${errorMessage}`,
+      sessionParams: sessionState as unknown as Record<string, unknown>,
+    };
+  }
+
+  const runtimeConfig: OllamaAdapterConfig = { ...config, model: resolvedModel };
+  const client = new OllamaApiClient(runtimeConfig);
+
+  await ctx.onLog("stdout", `[ollama] Starting run ${ctx.runId} for agent "${ctx.agent.name}"\n`);
+  await ctx.onLog("stdout", `[ollama] Model: ${resolvedModel} @ ${baseUrl}\n`);
+
+  const { system, user } = buildPrompt(ctx, runtimeConfig);
   const messages: OllamaSessionMessage[] = [{ role: "system", content: system }];
 
   if (sessionState.messageHistory?.length) {
@@ -113,7 +143,7 @@ async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionRe
         outputTokens: result.usage.completionTokens,
       },
       provider: "ollama",
-      model: config.model,
+      model: resolvedModel,
       costUsd: 0,
       summary: result.content,
       sessionParams: {
@@ -131,7 +161,7 @@ async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionRe
       timedOut: false,
       usage: { inputTokens: 0, outputTokens: 0 },
       provider: "ollama",
-      model: config.model,
+      model: resolvedModel,
       costUsd: 0,
       summary: `Error: ${errorMessage}`,
       sessionParams: sessionState as unknown as Record<string, unknown>,
@@ -143,14 +173,7 @@ async function testEnvironment(ctx: AdapterEnvironmentTestContext): Promise<Adap
   const config = ctx.config as unknown as OllamaAdapterConfig;
   const baseUrl = config.baseUrl ?? "http://localhost:11434";
   const checks: AdapterEnvironmentTestResult["checks"] = [];
-
-  if (!config.model) {
-    checks.push({
-      code: "model_missing",
-      level: "error",
-      message: "adapterConfig.model is required. Example: llama3.2",
-    });
-  }
+  const configuredModel = config.model ? normalizeModelName(config.model) : "";
 
   const client = new OllamaApiClient(config);
   const connectionResult = await client.testConnection();
@@ -169,27 +192,33 @@ async function testEnvironment(ctx: AdapterEnvironmentTestContext): Promise<Adap
     });
 
     const availableModels = connectionResult.models ?? [];
+    const normalizedAvailableModels = availableModels.map((m) => normalizeModelName(m));
+
     if (availableModels.length === 0) {
       checks.push({
         code: "no_models_pulled",
         level: "warn",
-        message: `No models found. Pull one with: ollama pull ${config.model || "llama3.2"}`,
+        message: `No models found. Pull one with: ollama pull ${configuredModel || "llama3.2"}`,
       });
     } else {
-      const modelFound = availableModels.some(
-        (m) => m === config.model || m.startsWith(`${config.model}:`),
-      );
-      if (modelFound) {
+      if (!configuredModel) {
+        const fallbackModel = normalizeModelName(availableModels[0]);
+        checks.push({
+          code: "model_defaulted",
+          level: "info",
+          message: `adapterConfig.model is empty. Using first available model: "${fallbackModel}".`,
+        });
+      } else if (normalizedAvailableModels.includes(configuredModel)) {
         checks.push({
           code: "model_available",
           level: "info",
-          message: `Model "${config.model}" is available in Ollama.`,
+          message: `Model "${configuredModel}" is available in Ollama.`,
         });
       } else {
         checks.push({
           code: "model_not_pulled",
           level: "error",
-          message: `Model "${config.model}" is not pulled. Available: ${availableModels.join(", ")}. Run: ollama pull ${config.model}`,
+          message: `Model "${configuredModel}" is not pulled. Available: ${availableModels.join(", ")}. Run: ollama pull ${configuredModel}`,
         });
       }
     }
@@ -235,6 +264,7 @@ async function getConfigSchema(): Promise<AdapterConfigSchema> {
   if (modelOptions.length === 0) {
     modelOptions = models.map((m) => ({ value: m.id, label: m.label }));
   }
+  const defaultModel = modelOptions[0]?.value;
 
   return {
     fields: [
@@ -243,6 +273,7 @@ async function getConfigSchema(): Promise<AdapterConfigSchema> {
         label: "Model",
         type: "combobox",
         options: modelOptions,
+        default: defaultModel,
         required: true,
         hint: "Model name from your Ollama instance. Pull with: ollama pull llama3.2",
       },

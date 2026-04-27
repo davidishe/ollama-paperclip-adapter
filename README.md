@@ -29,7 +29,7 @@ Go to **Settings → Adapters → Add adapter** and set:
 ```yaml
 adapterType: ollama_local
 adapterConfig:
-  model: llama3.2
+  model: llama3.2               # optional if at least one model is installed
   # Optional:
   baseUrl: http://localhost:11434   # default
   maxTokens: 8192                   # default
@@ -39,6 +39,7 @@ adapterConfig:
 ```
 
 No API key is required. Ollama runs fully locally.
+If `model` is omitted, adapter uses the first available model from `ollama /api/tags`.
 
 ## Supported models
 
