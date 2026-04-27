@@ -5,6 +5,7 @@ import type {
   AdapterEnvironmentTestResult,
   ServerAdapterModule,
   AdapterModel,
+  AdapterConfigSchema,
 } from "@paperclipai/adapter-utils";
 import { buildPrompt } from "./prompt-builder.js";
 import { OllamaApiClient } from "./ollama-api.js";
@@ -216,6 +217,66 @@ async function listModels(): Promise<AdapterModel[]> {
   }
 }
 
+async function getConfigSchema(): Promise<AdapterConfigSchema> {
+  // Fetch live models from Ollama for the dropdown; fall back to curated list
+  let modelOptions: Array<{ label: string; value: string }> = [];
+  try {
+    const client = new OllamaApiClient({} as OllamaAdapterConfig);
+    const result = await client.testConnection();
+    if (result.ok && result.models?.length) {
+      modelOptions = result.models.map((name) => {
+        const id = name.replace(/:latest$/, "");
+        return { value: id, label: id };
+      });
+    }
+  } catch {
+    // ignore
+  }
+  if (modelOptions.length === 0) {
+    modelOptions = models.map((m) => ({ value: m.id, label: m.label }));
+  }
+
+  return {
+    fields: [
+      {
+        key: "model",
+        label: "Model",
+        type: "combobox",
+        options: modelOptions,
+        required: true,
+        hint: "Model name from your Ollama instance. Pull with: ollama pull llama3.2",
+      },
+      {
+        key: "baseUrl",
+        label: "Ollama URL",
+        type: "text",
+        default: "http://localhost:11434",
+        hint: "Leave blank for local Ollama. Set to remote host for GPU server.",
+      },
+      {
+        key: "temperature",
+        label: "Temperature",
+        type: "number",
+        default: 0.7,
+        hint: "Sampling temperature (0.0–2.0). Lower = more deterministic.",
+      },
+      {
+        key: "maxTokens",
+        label: "Max tokens",
+        type: "number",
+        default: 8192,
+        hint: "Maximum tokens in the response.",
+      },
+      {
+        key: "customSystemPrompt",
+        label: "Custom system prompt",
+        type: "textarea",
+        hint: "Extra instructions appended to the system prompt.",
+      },
+    ],
+  };
+}
+
 export function createServerAdapter(): ServerAdapterModule {
   return {
     type: ADAPTER_TYPE,
@@ -223,6 +284,7 @@ export function createServerAdapter(): ServerAdapterModule {
     testEnvironment,
     models,
     listModels,
+    getConfigSchema,
     agentConfigurationDoc,
     supportsLocalAgentJwt: false,
     supportsInstructionsBundle: false,
